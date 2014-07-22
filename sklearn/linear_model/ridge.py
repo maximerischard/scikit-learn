@@ -29,7 +29,7 @@ from ..externals import six
 from ..metrics.scorer import check_scoring
 
 
-def _solve_sparse_cg(X, y, alpha, max_iter=None, tol=1e-3):
+def _solve_sparse_cg(X, y, alpha, max_iter=None, tol=1e-3, coef_init=None):
     n_samples, n_features = X.shape
     X1 = sp_linalg.aslinearoperator(X)
     coefs = np.empty((y.shape[1], n_features))
@@ -54,7 +54,11 @@ def _solve_sparse_cg(X, y, alpha, max_iter=None, tol=1e-3):
             # w = X.T * inv(X X^t + alpha*Id) y
             C = sp_linalg.LinearOperator(
                 (n_samples, n_samples), matvec=mv, dtype=X.dtype)
-            coef, info = sp_linalg.cg(C, y_column, tol=tol)
+            if coef_init is not None:
+                x0 = X1.matvec(coef_init)
+            else:
+                x0 = None
+            coef, info = sp_linalg.cg(C, y_column, x0=x0, tol=tol)
             coefs[i] = X1.rmatvec(coef)
         else:
             # linear ridge
@@ -62,7 +66,7 @@ def _solve_sparse_cg(X, y, alpha, max_iter=None, tol=1e-3):
             y_column = X1.rmatvec(y_column)
             C = sp_linalg.LinearOperator(
                 (n_features, n_features), matvec=mv, dtype=X.dtype)
-            coefs[i], info = sp_linalg.cg(C, y_column, maxiter=max_iter,
+            coefs[i], info = sp_linalg.cg(C, y_column, x0=coef_init, maxiter=max_iter,
                                           tol=tol)
         if info != 0:
             raise ValueError("Failed with error code %d" % info)
@@ -187,7 +191,7 @@ def _deprecate_dense_cholesky(solver):
 
 
 def ridge_regression(X, y, alpha, sample_weight=None, solver='auto',
-                     max_iter=None, tol=1e-3):
+                     max_iter=None, tol=1e-3, coef_init=None):
     """Solve the ridge equation by the method of normal equations.
 
     Parameters
@@ -306,7 +310,7 @@ def ridge_regression(X, y, alpha, sample_weight=None, solver='auto',
         raise ValueError('Solver %s not understood' % solver)
 
     if solver == 'sparse_cg':
-        coef = _solve_sparse_cg(X, y, alpha, max_iter, tol)
+        coef = _solve_sparse_cg(X, y, alpha, max_iter, tol, coef_init)
 
     elif solver == "lsqr":
         coef = _solve_lsqr(X, y, alpha, max_iter, tol)
@@ -353,7 +357,7 @@ class _BaseRidge(six.with_metaclass(ABCMeta, LinearModel)):
         self.tol = tol
         self.solver = solver
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, coef_init=None, sample_weight=None):
         X, y = check_X_y(X, y, ['csr', 'csc', 'coo'], dtype=np.float, multi_output=True)
 
         if ((sample_weight is not None) and
@@ -371,7 +375,9 @@ class _BaseRidge(six.with_metaclass(ABCMeta, LinearModel)):
                                       sample_weight=sample_weight,
                                       max_iter=self.max_iter,
                                       tol=self.tol,
-                                      solver=solver)
+                                      solver=solver,
+                                      coef_init=coef_init,
+                                    )
         self._set_intercept(X_mean, y_mean, X_std)
         return self
 
@@ -464,7 +470,7 @@ class Ridge(_BaseRidge, RegressorMixin):
                                     normalize=normalize, copy_X=copy_X,
                                     max_iter=max_iter, tol=tol, solver=solver)
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, coef_init=None, sample_weight=None):
         """Fit Ridge regression model
 
         Parameters
@@ -482,7 +488,7 @@ class Ridge(_BaseRidge, RegressorMixin):
         -------
         self : returns an instance of self.
         """
-        return super(Ridge, self).fit(X, y, sample_weight=sample_weight)
+        return super(Ridge, self).fit(X, y, coef_init=coef_init, sample_weight=sample_weight)
 
 
 class RidgeClassifier(LinearClassifierMixin, _BaseRidge):
